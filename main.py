@@ -1,7 +1,10 @@
+import logging
 import os
 
 from fastapi import FastAPI
 from pymongo import MongoClient
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="Prank Videos API")
 
@@ -12,14 +15,14 @@ MONGO_URI = os.getenv(
 PORT = int(os.getenv("PORT", "8000"))
 
 try:
-    client = MongoClient(MONGO_URI)
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client["prankVideos"]
     collection = db["videos"]
 except Exception as exc:
     client = None
     db = None
     collection = None
-    print(f"MongoDB connection error: {exc}")
+    logger.warning("MongoDB connection error at startup: %s", exc)
 
 
 @app.get("/")
@@ -29,13 +32,20 @@ def home():
 
 @app.get("/videos")
 def get_videos():
-    if collection is None:
-        return {"videos": [], "error": "MongoDB connection not available"}
+    try:
+        if collection is None:
+            raise RuntimeError("MongoDB connection not available")
 
-    documents = collection.find({}, {"_id": 0})
-    videos = list(documents)
-
-    return {"videos": videos}
+        documents = collection.find({}, {"_id": 0})
+        videos = list(documents)
+        return {"videos": videos}
+    except Exception as exc:
+        logger.exception("Failed to fetch videos from MongoDB")
+        return {
+            "videos": [],
+            "error": "Could not load videos from MongoDB",
+            "details": str(exc),
+        }
 
 
 if __name__ == "__main__":
